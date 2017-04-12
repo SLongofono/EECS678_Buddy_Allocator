@@ -7,7 +7,7 @@
 /**************************************************************************
  * Conditional Compilation Options
  **************************************************************************/
-#define USE_DEBUG 0
+#define USE_DEBUG 1
 
 /**************************************************************************
  * Included Files
@@ -17,6 +17,11 @@
 
 #include "buddy.h"
 #include "list.h"
+/**************************************************************************
+ * Private Definitions
+ **************************************************************************/
+// Helpers
+
 
 /**************************************************************************
  * Public Definitions
@@ -45,13 +50,42 @@
 #  define IFDEBUG(x)
 #endif
 
+
 /**************************************************************************
  * Public Types
  **************************************************************************/
 typedef struct {
+	/* Every list member has a member called list_head, because the Linux
+	 * kernel uses a nested linked list scheme.
+	 *
+	 * Example
+	 *
+	 * ________________________
+	 *|			  |
+	 *|"head"		  |
+	 *| val       ____________|
+	 *| next --> |		  |
+	 *| <-- prev |    "head"  |
+	 *|	     |    val	  |
+	 *|	     |    next--> |
+	 *|    	     | <--prev	  |
+	 *|__________|____________|
+	 *
+	 *
+	 * list_head is used internally, and we need only to include it in our
+	 * struct and initialize it to be able to use a linked list.
+	 */
+
 	struct list_head list;
-	/* TODO: DECLARE NECESSARY MEMBER VARIABLES */
+
+	// The address where this page begins
+	char * address;
+
+	// The index of this page into memory
+	int index;
+
 } page_t;
+
 
 /**************************************************************************
  * Global Variables
@@ -65,13 +99,16 @@ char g_memory[1<<MAX_ORDER];
 /* page structures */
 page_t g_pages[(1<<MAX_ORDER)/PAGE_SIZE];
 
+
 /**************************************************************************
  * Public Function Prototypes
  **************************************************************************/
 
+
 /**************************************************************************
  * Local Functions
  **************************************************************************/
+
 
 /**
  * Initialize the buddy system
@@ -81,7 +118,12 @@ void buddy_init()
 	int i;
 	int n_pages = (1<<MAX_ORDER) / PAGE_SIZE;
 	for (i = 0; i < n_pages; i++) {
-		/* TODO: INITIALIZE PAGE STRUCTURES */
+		// Initialize this as a linked list element
+		INIT_LIST_HEAD(&g_pages[i].list);
+
+		g_pages[i].index = i;
+
+		g_pages[i].address = 0 + (i*PAGE_SIZE);
 	}
 
 	/* initialize freelist */
@@ -93,13 +135,14 @@ void buddy_init()
 	list_add(&g_pages[0].list, &free_area[MAX_ORDER]);
 }
 
+
 /**
  * Allocate a memory block.
  *
  * On a memory request, the allocator returns the head of a free-list of the
  * matching size (i.e., smallest block that satisfies the request). If the
  * free-list of the matching block size is empty, then a larger block size will
- * be selected. The selected (large) block is then splitted into two smaller
+ * be selected. The selected (large) block is then split into two smaller
  * blocks. Among the two blocks, left block will be used for allocation or be
  * further splitted while the right block will be added to the appropriate
  * free-list.
@@ -110,8 +153,12 @@ void buddy_init()
 void *buddy_alloc(int size)
 {
 	/* TODO: IMPLEMENT THIS FUNCTION */
+	// Find order to use
+	// 
+
 	return NULL;
 }
+
 
 /**
  * Free an allocated memory block.
@@ -126,6 +173,7 @@ void buddy_free(void *addr)
 {
 	/* TODO: IMPLEMENT THIS FUNCTION */
 }
+
 
 /**
  * Print the buddy system status---order oriented
