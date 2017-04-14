@@ -1,0 +1,67 @@
+
+Initialize the buddy system
+
+We begin with the entirety of memory in the largest free_area list.  Since
+our minimum order is 12, we allocate at least 4kB every time.  This is the
+initial state
+
+256k	{[]}
+128k	{}
+64k 	{}
+32k  {}
+16k  {}
+8k  	{}
+4k  	{}
+
+On add, we find the smallest list with a free entry.  Initially, this will
+be only the 256k list.
+
+Say we have a worst case scenario, we need only a single page.  We will
+find the 256k page, and need to decide if we need to split.
+
+How will splitting work?  
+
+	need to find the smallest list with a free chunk of pages
+	if that page can be split, we need to load all the pages into the
+	next smallest list.  We know the size of the current chunk, so we can
+	determine the number of pages to push.  Pages must be pushed in order,
+	since we need to maintain order within chunks.
+
+	It might also be wise to mark the pages as written first, and add that
+	half of pages to the back of the list.  The instructions say to always
+	take the head of the list when checking the free lists, which ties
+	into why this method is fast enough in the first place, so we
+	shouldn't violate that.
+
+	Something to consider is that it is not clear whether the used pages
+	belong in the free_area or not.  The name suggests not, but the
+	comments seem to contradict this.  The first step when allocating a
+	block is checking IF the head of the matching list is free.  This
+	indicates that the FREE_AREA contains NONFREE chunks.  WTF.
+
+How will joining work?
+
+	First, set each page to free.  While doing so, retain the pointer to
+	the final member of the list.
+
+	If our buddy is available, it will always be at the current level.
+	Chunks will be not be contiguous, but pages within chunks will.  Thus
+	we need to identify the index of the first page within our buddy's
+	chunk, and scan through the list for that index.  When we find it, we
+	need one more list pointer to get the end of the first chunk.  This
+	will allow us to set its next to the head of the second chunk, and the
+	previous of the second chunk's head to the tail of the first chunk.
+	
+	After the joining is complete, the pages should be added in order to
+	the next size up of memory pool.
+
+When pages are allocated, they should be tracked in a separate list, to be
+reinstated on free.  This maintains that only free chunks exist in the
+free_area arrays.
+
+One idea is just to track the starting address and the order in a separate
+struct, the bare minimum required for bookkeeping.  Then, when returning
+pages, generate a page for each one in order, and add them to the back of the
+appropriate free_area list.
+
+

@@ -84,12 +84,16 @@ typedef struct {
 	// The index of this page into memory
 	int index;
 
+	// Is this page free
+	int isFree;
+
 } page_t;
 
 
 /**************************************************************************
  * Global Variables
  **************************************************************************/
+
 /* free lists*/
 struct list_head free_area[MAX_ORDER+1];
 
@@ -109,10 +113,6 @@ page_t g_pages[(1<<MAX_ORDER)/PAGE_SIZE];
  * Local Functions
  **************************************************************************/
 
-
-/**
- * Initialize the buddy system
- */
 void buddy_init()
 {
 	int i;
@@ -121,9 +121,11 @@ void buddy_init()
 		// Initialize this as a linked list element
 		INIT_LIST_HEAD(&g_pages[i].list);
 
+		// Track indices for sizing and moving
 		g_pages[i].index = i;
 
-		g_pages[i].address = 0 + (i*PAGE_SIZE);
+		// Address is increments of page size from start
+		(g_pages[i].address) = l64a(0 + (i*PAGE_SIZE));
 	}
 
 	/* initialize freelist */
@@ -144,7 +146,7 @@ void buddy_init()
  * free-list of the matching block size is empty, then a larger block size will
  * be selected. The selected (large) block is then split into two smaller
  * blocks. Among the two blocks, left block will be used for allocation or be
- * further splitted while the right block will be added to the appropriate
+ * further split while the right block will be added to the appropriate
  * free-list.
  *
  * @param size size in bytes
@@ -153,8 +155,33 @@ void buddy_init()
 void *buddy_alloc(int size)
 {
 	/* TODO: IMPLEMENT THIS FUNCTION */
-	// Find order to use
-	// 
+	
+
+	/*
+	 * Basic algorithm
+	 *
+	 * 	Find smallest non empty list
+	 *
+	 * 	Get head of that list.
+	 *
+	 * 	Determine if we need to split: condition is if half of the list
+	 * 	size is greater than the allocation size
+	 *
+	 * 	Splitting algorithm (keep track of head of final list)
+	 *
+	 * 	Assign the pages of the head of the final list to the allocation
+	 *
+	 * 	Return the address of the head member.
+	 *
+	 * Splitting algorithm
+	 *
+	 * 	While half the size of the list members is greater than the size of of
+	 * 	the desired allocation size:
+	 *
+	 * 		remove list size/page size pages from that list
+	 * 		to the 
+	 *
+	 * */
 
 	return NULL;
 }
@@ -172,6 +199,12 @@ void *buddy_alloc(int size)
 void buddy_free(void *addr)
 {
 	/* TODO: IMPLEMENT THIS FUNCTION */
+
+	/*
+	 * Basic idea:
+	 * 	The 
+	 *
+	 * */
 }
 
 
