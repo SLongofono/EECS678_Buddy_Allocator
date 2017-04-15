@@ -15,6 +15,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include <stdint.h> // For intptr type
+
 #include "buddy.h"
 #include "list.h"
 /**************************************************************************
@@ -56,38 +58,40 @@
  **************************************************************************/
 typedef struct {
 	/* Every list member has a member called list_head, because the Linux
-	 * kernel uses a nested linked list scheme.
-	 *
-	 * Example
-	 *
-	 * ________________________
-	 *|			  |
-	 *|"head"		  |
-	 *| val       ____________|
-	 *| next --> |		  |
-	 *| <-- prev |    "head"  |
-	 *|	     |    val	  |
-	 *|	     |    next--> |
-	 *|    	     | <--prev	  |
-	 *|__________|____________|
-	 *
+	 * kernel uses a circular linked list scheme.
 	 *
 	 * list_head is used internally, and we need only to include it in our
 	 * struct and initialize it to be able to use a linked list.
+	 *
+	 * When an individual element is initialized, its next and previous
+	 * pointer are set to itself.
 	 */
+		
+
 
 	struct list_head list;
 
 	// The address where this page begins
-	char * address;
+	char* address;
 
 	// The index of this page into memory
 	int index;
 
 	// Is this page free
-	int isFree;
+	int inUse;
 
 } page_t;
+
+
+// Used to keep track of allocated groups of pages, so we can rebuild them
+// when we free a block
+typedef struct{
+	// Where does this block begin
+	char* address;
+
+	// What size is this block
+	int order;
+} alloc_block;
 
 
 /**************************************************************************
@@ -125,7 +129,10 @@ void buddy_init()
 		g_pages[i].index = i;
 
 		// Address is increments of page size from start
-		(g_pages[i].address) = l64a(0 + (i*PAGE_SIZE));
+		//(g_pages[i].address) = (g_memory + (i*PAGE_SIZE));
+		(g_pages[i].address) = (char*)PAGE_TO_ADDR(i);
+
+		printf("%p\n", (void*)g_pages[i].address);
 	}
 
 	/* initialize freelist */
@@ -156,12 +163,75 @@ void *buddy_alloc(int size)
 {
 	/* TODO: IMPLEMENT THIS FUNCTION */
 	
+	int num_splits = 0;
+	int target_order = MAX_ORDER;
+	int highest_free_order = MAX_ORDER;
+
+	struct list_head current_list = free_area[MAX_ORDER];
+
+	// Check that size is valid (not too big)
+	assert(size <= (1 << MAX_ORDER));
+
+
+	// While the size we are looking at, divided by two, is larger than
+	// the allocation size...
+	while(size <= (1 <<(target_order-1))){
+		
+		// Track the last order which had free pages
+		if(!list_empty(&free_area[target_order-1])){
+			highest_free_order--;
+		}
+
+		// Update order for allocation
+		target_order--;
+	}
+
+	// Make sure that we have free memory to allocate the requested size
+	assert((1 << highest_free_order) >= size);
+
+	// Split
+	while(num_splits > 0){
+		current_list = free_area[highest_free_order];
+		
+		int num_pages = (1 << (highest_free_order))/PAGE_SIZE;
+		while(num_pages > 0){
+			// pop off current free_area
+
+
+			// push to next lowest free_area
+		}
+
+
+		// Create an allocation block type
+
+
+		// pull off the number of pages in this order
+		// save the address of the first one in the allocation block
+		// type
+		
+
+	}
+
+	// By this point, target_order is where the allocation should happen.
+	// Also, the order of the highest_free_order-target_order is the number of
+	// times to split
+	
+
+	
+
+	// Check if a free block exists at the target size
+	// If yes, got to allocation
+	// If no
+	//while(list_empty()){
+			
+	//}
+
 
 	/*
 	 * Basic algorithm
 	 *
 	 * 	Find smallest non empty list
-	 *
+	 *	
 	 * 	Get head of that list.
 	 *
 	 * 	Determine if we need to split: condition is if half of the list
@@ -169,11 +239,32 @@ void *buddy_alloc(int size)
 	 *
 	 * 	Splitting algorithm (keep track of head of final list)
 	 *
-	 * 	Assign the pages of the head of the final list to the allocation
+	 * 	Take the first block of the free area in use, create an alloc_block, 
+	 * 	and assign the first address of the first page to that block
 	 *
-	 * 	Return the address of the head member.
+	 * 	Pop off that many pages
+	 *
+	 * 	Return the address of the allocated block.
 	 *
 	 * Splitting algorithm
+	 *
+	 *     find lowest free page size
+	 *
+	 *     if(lowest > size){
+	 *
+	 *     		find lowest size that will fit the page
+	 *
+	 *     		while((current_order >> 1) > size){
+	 *			current_order >> 1;
+	 *			current_list = next_lowest_list
+	 *     		}
+	 *     	}
+	 *     	else{
+	 *		find minimum page size that will fit
+	 *     	}
+	 *
+	 *     
+	 *
 	 *
 	 * 	While half the size of the list members is greater than the size of of
 	 * 	the desired allocation size:
@@ -182,7 +273,6 @@ void *buddy_alloc(int size)
 	 * 		to the 
 	 *
 	 * */
-
 	return NULL;
 }
 
