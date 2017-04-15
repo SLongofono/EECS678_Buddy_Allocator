@@ -15,7 +15,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include <stdint.h> // For intptr type
+#include <assert.h>
 
 #include "buddy.h"
 #include "list.h"
@@ -78,7 +78,7 @@ typedef struct {
 	int index;
 
 	// Is this page free
-	int inUse;
+	int isFree;
 
 } page_t;
 
@@ -98,15 +98,17 @@ typedef struct{
  * Global Variables
  **************************************************************************/
 
-/* free lists*/
+/* free lists, store structs representing pages in blocks of various orders */
 struct list_head free_area[MAX_ORDER+1];
 
-/* memory area */
+/* memory area, no real use beyond the macros and initialization */
 char g_memory[1<<MAX_ORDER];
 
 /* page structures */
 page_t g_pages[(1<<MAX_ORDER)/PAGE_SIZE];
 
+/* keeps track of allocated blocks in compact format */
+struct list_head allocated;
 
 /**************************************************************************
  * Public Function Prototypes
@@ -132,7 +134,8 @@ void buddy_init()
 		//(g_pages[i].address) = (g_memory + (i*PAGE_SIZE));
 		(g_pages[i].address) = (char*)PAGE_TO_ADDR(i);
 
-		printf("%p\n", (void*)g_pages[i].address);
+		// All start as free
+		g_pages[i].isFree = 1;
 	}
 
 	/* initialize freelist */
@@ -161,17 +164,24 @@ void buddy_init()
  */
 void *buddy_alloc(int size)
 {
-	/* TODO: IMPLEMENT THIS FUNCTION */
-	
+
+	printf("Attempting to allocate for size %d...\n", size);
+
 	int num_splits = 0;
 	int target_order = MAX_ORDER;
 	int highest_free_order = MAX_ORDER;
+	char *alloc_start_address = NULL;
 
-	struct list_head current_list = free_area[MAX_ORDER];
+	// Tracks the allocated block start address and order
+	alloc_block alloc;
+
+	// Navigating the linked lists
+	struct list_head *current_list = &free_area[MAX_ORDER];
+	struct list_head *next_list;
 
 	// Check that size is valid (not too big)
 	assert(size <= (1 << MAX_ORDER));
-
+	printf("Allocation is not too big...\n");
 
 	// While the size we are looking at, divided by two, is larger than
 	// the allocation size...
@@ -180,36 +190,37 @@ void *buddy_alloc(int size)
 		// Track the last order which had free pages
 		if(!list_empty(&free_area[target_order-1])){
 			highest_free_order--;
+			printf("Order %d had free pages...\n", highest_free_order);
 		}
 
 		// Update order for allocation
 		target_order--;
 	}
 
+	printf("Settled on order %d (%d bytes) for size %d...\n", target_order, (1<<target_order), size);
+
 	// Make sure that we have free memory to allocate the requested size
 	assert((1 << highest_free_order) >= size);
 
-	// Split
+	printf("We have enough memory to perform the allocation...\n");
+
+	// Determine how many splits need to take place
+	num_splits = highest_free_order - target_order;
+
+	// Pull off pages to be allocated
+	current_list = &free_area[highest_free_order];
+	
+	//struct  page_t *p = list_entry
+	
+	//printf("pulling off member %p\n", p->address);
+	
+	// Split remaining pages among the other free_areas.  Need to start at
+	// the bottom to maintain the proper page order.
 	while(num_splits > 0){
-		current_list = free_area[highest_free_order];
-		
-		int num_pages = (1 << (highest_free_order))/PAGE_SIZE;
-		while(num_pages > 0){
-			// pop off current free_area
-
-
-			// push to next lowest free_area
-		}
-
-
-		// Create an allocation block type
-
-
-		// pull off the number of pages in this order
-		// save the address of the first one in the allocation block
-		// type
 		
 
+		next_list = &free_area[target_order];
+		num_splits--;
 	}
 
 	// By this point, target_order is where the allocation should happen.
