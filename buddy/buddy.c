@@ -110,6 +110,7 @@ page_t g_pages[(1<<MAX_ORDER)/PAGE_SIZE];
 /* keeps track of allocated blocks in compact format */
 struct list_head allocated;
 
+
 /**************************************************************************
  * Public Function Prototypes
  **************************************************************************/
@@ -170,6 +171,7 @@ void *buddy_alloc(int size)
 	int num_splits = 0;
 	int target_order = MAX_ORDER;
 	int highest_free_order = MAX_ORDER;
+	int num_pages, remaining_pages;
 	char *alloc_start_address = NULL;
 
 	// Tracks the allocated block start address and order
@@ -208,6 +210,10 @@ void *buddy_alloc(int size)
 	num_splits = highest_free_order - target_order;
 
 	// Pull off pages to be allocated
+	remaining_pages = ((1 << highest_free_order)/PAGE_SIZE);
+	
+	num_pages = ((1 << target_order)/PAGE_SIZE);
+
 	current_list = &free_area[highest_free_order];
 	
 	//struct  page_t *p = list_entry
@@ -313,6 +319,11 @@ void buddy_free(void *addr)
  * Print the buddy system status---order oriented
  *
  * print free pages in each order.
+ *
+ *
+ * Note: this implies that free area lists are made up of pages and not
+ * chunks.  For each size, it counts the number of pages, and divides by the
+ * size of the current free_area list order
  */
 void buddy_dump()
 {
@@ -326,4 +337,19 @@ void buddy_dump()
 		printf("%d:%dK ", cnt, (1<<o)/1024);
 	}
 	printf("\n");
+}
+
+
+/**
+ * Print addresses of free area list members
+ */
+void  print_free_area(order){
+	int i;
+	for(i=MIN_ORDE, i < MAX_ORDER, ++i){
+		struct list_head *pos
+		list_for_each(pos, &free_area[i]){
+			printf("%p, ", list_entry(pos, &free_area[i])->address);	
+		}
+		printf("\n");
+	}
 }
