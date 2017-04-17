@@ -86,6 +86,9 @@ typedef struct {
 // Used to keep track of allocated groups of pages, so we can rebuild them
 // when we free a block
 typedef struct{
+
+	struct list_head list;
+
 	// Where does this block begin
 	char* address;
 
@@ -122,6 +125,11 @@ struct list_head allocated;
 
 void buddy_init()
 {
+
+#if USE_DEBUG
+	printf("Initializing buddy allocator...\n");
+#endif
+
 	int i;
 	int n_pages = (1<<MAX_ORDER) / PAGE_SIZE;
 	for (i = 0; i < n_pages; i++) {
@@ -146,6 +154,14 @@ void buddy_init()
 
 	/* add the entire memory as a freeblock */
 	list_add(&g_pages[0].list, &free_area[MAX_ORDER]);
+
+	// Initialize the allocations list head pointer
+	LIST_HEAD(allocated);
+
+#if USE_DEBUG
+	printf("Done\n");
+#endif
+
 }
 
 
@@ -170,7 +186,7 @@ void *buddy_alloc(int size)
 
 	int num_splits = 0;
 	int target_order = MAX_ORDER;
-	int highest_free_order = MAX_ORDER;
+	int active_order = MAX_ORDER;
 	int num_pages, remaining_pages;
 	char *alloc_start_address = NULL;
 
@@ -178,8 +194,11 @@ void *buddy_alloc(int size)
 	alloc_block alloc;
 
 	// Navigating the linked lists
-	struct list_head *current_list = &free_area[MAX_ORDER];
-	struct list_head *next_list;
+	struct list_head *cur_list_head;
+	
+	// For managing the pages to be allocated and split
+	struct list_head *buffer;
+	INIT_LIST_HEAD(buffer);
 
 	// Check that size is valid (not too big)
 	assert(size <= (1 << MAX_ORDER));
@@ -191,8 +210,8 @@ void *buddy_alloc(int size)
 		
 		// Track the last order which had free pages
 		if(!list_empty(&free_area[target_order-1])){
-			highest_free_order--;
-			printf("Order %d had free pages...\n", highest_free_order);
+			active_order--;
+			printf("Order %d had free pages...\n", active_order);
 		}
 
 		// Update order for allocation
@@ -202,19 +221,60 @@ void *buddy_alloc(int size)
 	printf("Settled on order %d (%d bytes) for size %d...\n", target_order, (1<<target_order), size);
 
 	// Make sure that we have free memory to allocate the requested size
-	assert((1 << highest_free_order) >= size);
+	assert((1 << active_order) >= size);
 
 	printf("We have enough memory to perform the allocation...\n");
 
 	// Determine how many splits need to take place
-	num_splits = highest_free_order - target_order;
+	num_splits = active_order - target_order;
 
-	// Pull off pages to be allocated
-	remaining_pages = ((1 << highest_free_order)/PAGE_SIZE);
+	/* Pull off pages to be allocated
+	 *
+	 */
+	remaining_pages = ((1 << active_order)/PAGE_SIZE);
+
+	cur_list_head = &free_area[active_order];
+
+	// Gather all pages to be moved into the buffer in order
+	while(remaining_pages > 0){
+		// Add head of current free_area to rear of buffer
+		list_add_tail(cur_list_head, buffer);
+
+		// Remove current free area head
+		list_del(cur_list_head);
+		
+		remaining_pages--;
+	}
 	
-	num_pages = ((1 << target_order)/PAGE_SIZE);
+	// Create and store the allocation block
+	cur_list_head = buffer->next;
+	page_t* temp = list_entry(buffer, page_t, list);
+	alloc.address = temp->address;
+	alloc.order = target_order;
+	list_add(&alloc.list, &allocated);
 
-	current_list = &free_area[highest_free_order];
+
+	// Performs splitting and shuffles around pages accordingly
+	while(active_order >= target_order){
+		active_order--;
+		cur_list_head = &free_area[active_order];
+		remaining_pages = (1 << active_order)/PAGE_SIZE;
+		
+		while(remaining_pages > 0){
+			// Add rear of buffer to front of current free_area
+			list_add(buffer->prev, cur_list_head);
+
+			// Remove rear of buffer
+			list_del(buffer->prev);
+
+			remaining_pages--;
+		}
+
+	}
+
+
+	//num_pages = ((1 << target_order)/PAGE_SIZE);
+
 	
 	//struct  page_t *p = list_entry
 	
@@ -222,15 +282,15 @@ void *buddy_alloc(int size)
 	
 	// Split remaining pages among the other free_areas.  Need to start at
 	// the bottom to maintain the proper page order.
-	while(num_splits > 0){
+	//while(num_splits > 0){
 		
 
-		next_list = &free_area[target_order];
-		num_splits--;
-	}
+	//	next_list = &free_area[target_order];
+	//	num_splits--;
+	//}
 
 	// By this point, target_order is where the allocation should happen.
-	// Also, the order of the highest_free_order-target_order is the number of
+	// Also, the order of the active_order-target_order is the number of
 	// times to split
 	
 
@@ -273,7 +333,7 @@ void *buddy_alloc(int size)
 	 *
 	 *     		while((current_order >> 1) > size){
 	 *			current_order >> 1;
-	 *			current_list = next_lowest_list
+	 *			cur_list_head = next_lowest_list
 	 *     		}
 	 *     	}
 	 *     	else{
@@ -345,10 +405,10 @@ void buddy_dump()
  */
 void  print_free_area(order){
 	int i;
-	for(i=MIN_ORDE, i < MAX_ORDER, ++i){
-		struct list_head *pos
+	for(i=MIN_ORDER; i < MAX_ORDER; ++i){
+		struct list_head *pos;
 		list_for_each(pos, &free_area[i]){
-			printf("%p, ", list_entry(pos, &free_area[i])->address);	
+			printf("%p, ", list_entry(pos, page_t, list)->address);	
 		}
 		printf("\n");
 	}
