@@ -133,6 +133,11 @@ void buddy_init()
 	int i;
 	int n_pages = (1<<MAX_ORDER) / PAGE_SIZE;
 	for (i = 0; i < n_pages; i++) {
+
+		page_t *temp = (page_t*)malloc(sizeof(page_t));
+
+		g_pages[i] = *temp;
+
 		// Initialize this as a linked list element
 		INIT_LIST_HEAD(&g_pages[i].list);
 
@@ -156,7 +161,7 @@ void buddy_init()
 	list_add(&g_pages[0].list, &free_area[MAX_ORDER]);
 
 	// Initialize the allocations list head pointer
-	LIST_HEAD(allocated);
+	INIT_LIST_HEAD(&allocated);
 
 #if USE_DEBUG
 	printf("Done\n");
@@ -181,8 +186,10 @@ void buddy_init()
  */
 void *buddy_alloc(int size)
 {
+#if USE_DEBUG
 
 	printf("Attempting to allocate for size %d...\n", size);
+#endif
 
 	int num_splits = 0;
 	int target_order = MAX_ORDER;
@@ -200,30 +207,47 @@ void *buddy_alloc(int size)
 	struct list_head *buffer;
 	INIT_LIST_HEAD(buffer);
 
-	// Check that size is valid (not too big)
-	assert(size <= (1 << MAX_ORDER));
+
+	// Check that size is valid
+	assert(size <= (1 << MAX_ORDER) && size > 0);
+#if USE_DEBUG
 	printf("Allocation is not too big...\n");
+	printf("Sanity Check: List empty returns for all free_area lists...\n");
+	int j;
+	for(j=MAX_ORDER; j >= MIN_ORDER; j--){
+		printf("\tOrder %d (%d bytes) : %d\n", j, (1 << j),list_empty(&free_area[j]));
+	}
+
+#endif
 
 	// While the size we are looking at, divided by two, is larger than
 	// the allocation size...
 	while(size <= (1 <<(target_order-1))){
 		
 		// Track the last order which had free pages
-		if(!list_empty(&free_area[target_order-1])){
+		// list_empty returns 0 if the list is NOT empty
+		if(list_empty(&free_area[active_order])){
+#if USE_DEBUG
+			printf("Order %d had no free pages...\n", active_order);	
+#endif
 			active_order--;
-			printf("Order %d had free pages...\n", active_order);
 		}
 
 		// Update order for allocation
 		target_order--;
 	}
 
+#if USE_DEBUG
 	printf("Settled on order %d (%d bytes) for size %d...\n", target_order, (1<<target_order), size);
+#endif
 
 	// Make sure that we have free memory to allocate the requested size
 	assert((1 << active_order) >= size);
 
+#if USE_DEBUG
 	printf("We have enough memory to perform the allocation...\n");
+	printf("The smallest block size with free pages is order %d (%d bytes)\n", active_order, (1 << active_order));
+#endif
 
 	// Determine how many splits need to take place
 	num_splits = active_order - target_order;
@@ -231,12 +255,18 @@ void *buddy_alloc(int size)
 	/* Pull off pages to be allocated
 	 *
 	 */
+
 	remaining_pages = ((1 << active_order)/PAGE_SIZE);
 
 	cur_list_head = &free_area[active_order];
 
+#if USE_DEBUG
+	printf("Adding %d pages to buffer for allocation...\n", remaining_pages);
+#endif
+
 	// Gather all pages to be moved into the buffer in order
 	while(remaining_pages > 0){
+
 		// Add head of current free_area to rear of buffer
 		list_add_tail(cur_list_head, buffer);
 
@@ -246,19 +276,42 @@ void *buddy_alloc(int size)
 		remaining_pages--;
 	}
 	
+#if USE_DEBUG
+	printf("Creating record of allocation...\n");
+#endif
+
 	// Create and store the allocation block
 	cur_list_head = buffer->next;
 	page_t* temp = list_entry(buffer, page_t, list);
+
+	
+#if USE_DEBUG
+	printf("First address is %p\n", temp->address);
+#endif
+
+
 	alloc.address = temp->address;
 	alloc.order = target_order;
+	
+#if USE_DEBUG
+	printf("Adding record to allocation list...\n");
+#endif
+
 	list_add(&alloc.list, &allocated);
 
 
+#if USE_DEBUG
+	printf("Assigning split block pages to appropriate lists...\n");
+#endif
 	// Performs splitting and shuffles around pages accordingly
 	while(active_order >= target_order){
 		active_order--;
 		cur_list_head = &free_area[active_order];
 		remaining_pages = (1 << active_order)/PAGE_SIZE;
+
+#if USE_DEBUG
+		printf("List for %d will get %d pages...\n", (1<<active_order), remaining_pages);
+#endif
 		
 		while(remaining_pages > 0){
 			// Add rear of buffer to front of current free_area
@@ -272,7 +325,7 @@ void *buddy_alloc(int size)
 
 	}
 
-
+	printf("SO FAR SO GOOD\n");
 	//num_pages = ((1 << target_order)/PAGE_SIZE);
 
 	
@@ -387,6 +440,7 @@ void buddy_free(void *addr)
  */
 void buddy_dump()
 {
+	printf("PRINTING DUMP...\n");
 	int o;
 	for (o = MIN_ORDER; o <= MAX_ORDER; o++) {
 		struct list_head *pos;
@@ -404,6 +458,7 @@ void buddy_dump()
  * Print addresses of free area list members
  */
 void  print_free_area(order){
+	
 	int i;
 	for(i=MIN_ORDER; i < MAX_ORDER; ++i){
 		struct list_head *pos;
