@@ -148,6 +148,13 @@ void buddy_init()
 		//(g_pages[i].address) = (g_memory + (i*PAGE_SIZE));
 		(g_pages[i].address) = (char*)PAGE_TO_ADDR(i);
 
+
+#if USE_DEBUG
+		printf("Created address %p\n", g_pages[i].address);
+#endif
+
+
+
 		// All start as free
 		g_pages[i].isFree = 1;
 	}
@@ -159,6 +166,13 @@ void buddy_init()
 
 	/* add the entire memory as a freeblock */
 	list_add(&g_pages[0].list, &free_area[MAX_ORDER]);
+
+#if USE_DEBUG
+	count_pages(MAX_ORDER);
+#endif
+
+
+
 
 	// Initialize the allocations list head pointer
 	INIT_LIST_HEAD(&allocated);
@@ -257,23 +271,42 @@ void *buddy_alloc(int size)
 	 */
 
 	remaining_pages = ((1 << active_order)/PAGE_SIZE);
-
-	cur_list_head = &free_area[active_order];
+	
+	
+	page_t * p = list_entry(&free_area[active_order], page_t, list);
 
 #if USE_DEBUG
 	printf("Adding %d pages to buffer for allocation...\n", remaining_pages);
 #endif
 
+
 	// Gather all pages to be moved into the buffer in order
 	while(remaining_pages > 0){
 
+#if USE_DEBUG
+		printf("Moving page for address %p...\n", p->address);
+#endif
+
+
 		// Add head of current free_area to rear of buffer
-		list_add_tail(cur_list_head, buffer);
+		list_add_tail(&p->list, buffer);
+
+#if USE_DEBUG
+		count_pages(active_order);
+#endif
+
 
 		// Remove current free area head
-		list_del(cur_list_head);
+		list_del(&free_area[active_order]);
+
+#if USE_DEBUG
+		count_pages(active_order);
+#endif
+
 		
 		remaining_pages--;
+		
+		p = list_entry(&free_area[active_order], page_t, list);
 	}
 	
 #if USE_DEBUG
@@ -457,7 +490,7 @@ void buddy_dump()
 /**
  * Print addresses of free area list members
  */
-void  print_free_area(order){
+void  print_free_area(int order){
 	
 	int i;
 	for(i=MIN_ORDER; i < MAX_ORDER; ++i){
@@ -467,4 +500,13 @@ void  print_free_area(order){
 		}
 		printf("\n");
 	}
+}
+
+void count_pages(int order){
+	int count = 0;
+	struct list_head * pos;
+	list_for_each(pos, &free_area[order]){
+		count++;
+	}
+	printf("Free area order %d (%d bytes) has %d entries\n", order, (1<<order), count);
 }
