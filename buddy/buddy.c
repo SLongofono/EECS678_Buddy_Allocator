@@ -125,7 +125,7 @@ page_t buffer;
 
 // Count and report number of page_t elements in the free_area of the
 // specified order
-void count_pages(int order);
+void count_pages(struct list_head * theList);
 
 void print_page(page_t * pg);
 
@@ -180,7 +180,7 @@ void buddy_init()
 	}
 
 #if USE_DEBUG
-	count_pages(MAX_ORDER);
+	count_pages(&free_area[MAX_ORDER]);
 #endif
 
 	// Initialize buffer for shuffling pages
@@ -294,21 +294,16 @@ void *buddy_alloc(int size)
 
 #if USE_DEBUG
 		printf("Moving page for address %p...\n", p->address);
-		count_pages(active_order);
+		count_pages(&free_area[active_order]);
 #endif
 
 
 		// Add head of current free_area to rear of buffer
-		list_move_tail(&p->list, &buffer.list);
-
-		// Remove current free area head
-		//p = list_entry(free_area[active_order].next->next, page_t, list);
-		//list_del(free_area[active_order].next);
-		//free_area[active_order] = *p->list.next;
+		list_move_tail(free_area[active_order].next, &buffer.list);
 
 		remaining_pages--;
 		
-		p = list_entry(&free_area[active_order], page_t, list);
+		p = list_entry(free_area[active_order].next, page_t, list);
 	}
 	
 #if USE_DEBUG
@@ -316,14 +311,13 @@ void *buddy_alloc(int size)
 #endif
 
 	// Create and store the allocation block
-	cur_list_head = buffer.list.next;
-	page_t* temp = list_entry(&buffer.list, page_t, list);
+	//cur_list_head = buffer.list.next;
+	page_t* temp = list_entry(buffer.list.next, page_t, list);
 
 	
 #if USE_DEBUG
 	printf("First address is %p\n", temp->address);
 #endif
-
 
 	alloc.address = temp->address;
 	alloc.order = target_order;
@@ -332,6 +326,9 @@ void *buddy_alloc(int size)
 	printf("Adding record to allocation list...\n");
 #endif
 
+	// Assuming this list will be relatively small, and that the tests may
+	// allocate and free in roughly the same order, push to the front of
+	// the list to make searching faster later on.
 	list_add(&alloc.list, &allocated);
 
 
@@ -341,7 +338,6 @@ void *buddy_alloc(int size)
 	// Performs splitting and shuffles around pages accordingly
 	while(active_order >= target_order){
 		active_order--;
-		cur_list_head = &free_area[active_order];
 		remaining_pages = (1 << active_order)/PAGE_SIZE;
 
 #if USE_DEBUG
@@ -349,18 +345,27 @@ void *buddy_alloc(int size)
 #endif
 		
 		while(remaining_pages > 0){
-			// Add rear of buffer to front of current free_area
-			list_add(buffer.list.prev, cur_list_head);
+			p = list_entry(buffer.list.next, page_t, list);
+			printf("Moving page %p to list order %d...\n", p->address, active_order);
 
-			// Remove rear of buffer
-			list_del(buffer.list.prev);
+			// Add front of buffer to front of current free_area
+			list_move(buffer.list.next, free_area[active_order].prev);
+			//list_add(buffer.list.prev, free_area[active_order].next);
+
+			// Remove front of buffer
+			list_del(buffer.list.next);
 
 			remaining_pages--;
 		}
-
+		count_pages(&free_area[active_order]);
 	}
 
 	printf("SO FAR SO GOOD\n");
+
+	printf("Allocated block of size %d, beginning at address %p, for the request.  Exiting...\n", alloc.order, alloc.address);
+
+	return alloc.address;
+
 	//num_pages = ((1 << target_order)/PAGE_SIZE);
 
 	
@@ -483,6 +488,7 @@ void buddy_dump()
 		list_for_each(pos, &free_area[o]) {
 			cnt++;
 		}
+		printf("Counted %d pages in order %d...\n", cnt, o);
 		printf("%d:%dK ", (PAGE_SIZE * cnt)/(1 << o), (1<<o)/1024);
 	}
 	printf("\n");
@@ -504,15 +510,14 @@ void  print_free_area(int order){
 	}
 }
 
-void count_pages(int order){
+void count_pages(struct list_head* theList){
 	
-	printf("COUNTING LIST ENTRIES...\n");
 	int count = 0;
 	struct list_head * pos;
-	list_for_each(pos, &free_area[order]){
+	list_for_each(pos, theList){
 		count++;
 	}
-	printf("Free area order %d (%d bytes) has %d entries of size 4K\n", order, (1<<order), count);
+	printf("The given list has  %d page entries\n", count);
 }
 
 void print_page(page_t * pg){
