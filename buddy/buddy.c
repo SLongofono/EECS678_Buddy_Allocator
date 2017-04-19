@@ -221,11 +221,14 @@ void *buddy_alloc(int size)
 	printf("Attempting to allocate for size %d...\n", size);
 #endif
 	// Check that size is valid
-	assert(size <= (1 << MAX_ORDER) && size > 0);
+	if(size > (1 << MAX_ORDER) || size < 0){
+		printf("[ INVALID SIZE ERROR : MAX SIZE IS %d BYTES ]\n", (1 << MAX_ORDER));
+		return NULL;
+	}
 
 	int num_splits = 0;
 	int target_order = MAX_ORDER;
-	int active_order = MAX_ORDER;
+	int active_order = -1;
 
 	// Navigating the linked lists
 	block_t *lefty;
@@ -235,22 +238,34 @@ void *buddy_alloc(int size)
 	printf("Allocation is not too big...\n");
 #endif
 
-	// While the size we are looking at, divided by two, is larger than
-	// the allocation size...
-	while(size <= (1 <<(target_order-1))){
-		
-		// Track the last order which had free pages
-		// list_empty returns 0 if the list is NOT empty
-		if(NULL == find_free_block(active_order)){
-#if USE_DEBUG
-			printf("Order %d had no free pages...\n", active_order);	
-#endif
-			active_order--;
-		}
-
-		// Update order for allocation
-		target_order--;
+	if(size <= (1 << MIN_ORDER)){
+		target_order = MIN_ORDER;	
 	}
+	else{
+		// While the size we are looking at, divided by two, is larger than
+		// the allocation size...
+		while(size <= (1 <<(target_order-1))){
+		
+			// Update order for allocation
+			target_order--;
+		}
+	}
+
+	//Starting from the target order, find the smallest free_area with
+	//free blocks
+	for(active_order = target_order; active_order <= MAX_ORDER; active_order++){
+		if(NULL != find_free_block(active_order)){
+			break;
+		}
+		else if(active_order == MAX_ORDER){
+			printf("[ OUT OF MEMORY ERROR ]\n");
+			return NULL;	
+		}
+		else{
+			printf("Order %d has no free blocks...\n", active_order);	
+		}
+	}
+
 
 #if USE_DEBUG
 	printf("Settled on order %d (%d bytes) for size %d...\n", target_order, (1<<target_order), size);
@@ -305,17 +320,19 @@ void *buddy_alloc(int size)
 
 			
 			printf("Adding right half to next lowest order...\n");
-			//count_blocks(&free_area[active_order-1]);
+			count_blocks(&free_area[active_order-1]);
 
 
 			// Add the right half to the free_area of the next lowest order.
-			list_add(&righty->list, free_area[active_order-1].next);
+			list_add(&righty->list, &free_area[active_order-1]);
 
-			//count_blocks(&free_area[active_order-1]);
+			count_blocks(&free_area[active_order-1]);
 
 			// Sanity Check:
 			block_t * temp = list_entry(free_area[active_order-1].next, block_t, list);
-			assert(temp->address == righty->address);
+			printf("RIGHTY VS NEW BLOCK (index, order): (%d,%d) (%d, %d)\n", righty->index, righty->order, temp->index, temp->order);
+			
+			assert(temp->index == righty->index);
 
 			active_order--;
 			
@@ -328,7 +345,7 @@ void *buddy_alloc(int size)
 
 		lefty->isFree = 0;
 		lefty->order = active_order;
-		list_add_tail(&lefty->list, free_area[active_order].next);
+		list_add_tail(&lefty->list, &free_area[active_order]);
 	}
 
 	return lefty->address;
@@ -438,14 +455,16 @@ void buddy_dump_verbose(){
 	for (o = MIN_ORDER; o <= MAX_ORDER; o++) {
 		struct list_head *pos;
 		int cnt = 0;
+		int total = 0;
 		list_for_each(pos, &free_area[o]) {
 			block_t * temp = list_entry(pos, block_t, list);
+			total++;
 			if(1 == temp->isFree){
 				cnt++;
 			}
 			//printf("Block %d: (size, isFree)->(%d, %s)\n", cnt, (1 << temp->order), temp->isFree == 1 ? "FREE":"ALLOCATED");
 		}
-		printf("%d:%dK ", cnt, (1<<o)/1024);
+		printf("(%d/%d):%dK ", cnt, total, (1<<o)/1024);
 	}
 	printf("\n");
 	
