@@ -130,6 +130,10 @@ void buddy_dump_verbose();
 // Print counts of each size block among all possible sizes in free_area
 void buddy_dump();
 
+// Returns a pointer to the buddy block with the given address if it exists in
+// the free_area, or NULL otherwise
+block_t* find_block(char* addr);
+
 /**************************************************************************
  * Local Functions
  **************************************************************************/
@@ -151,9 +155,9 @@ void buddy_init()
 
 	for (i = 0; i < n_pages; i++) {
 
-		block_t *temp = (block_t*)malloc(sizeof(block_t));
+		//block_t *temp = (block_t*)malloc(sizeof(block_t));
 
-		g_pages[i] = *temp;
+		//g_pages[i] = *temp;
 
 		// Initialize this as a linked list element
 		INIT_LIST_HEAD(&g_pages[i].list);
@@ -169,8 +173,8 @@ void buddy_init()
 
 		// Address is increments of page size from start
 		//(g_pages[i].address) = (g_memory + (i*PAGE_SIZE));
-		g_pages[i].address = (char* )PAGE_TO_ADDR(i);
-		
+		g_pages[i].address = (char*)PAGE_TO_ADDR(i);
+	
 	}
 	
 	/* add the entire memory as a free block */
@@ -262,7 +266,9 @@ void *buddy_alloc(int size)
 			return NULL;	
 		}
 		else{
+#if USE_DEBUG
 			printf("Order %d has no free blocks...\n", active_order);	
+#endif
 		}
 	}
 
@@ -295,8 +301,10 @@ void *buddy_alloc(int size)
 		lefty->isFree = 0;
 	}
 	else{
+#if USE_DEBUG
 		printf("Removing left half from current active list...\n");
-		//count_blocks(&free_area[active_order]);
+		count_blocks(&free_area[active_order]);
+#endif
 		
 		
 		// Need to remove the left from this order
@@ -307,30 +315,33 @@ void *buddy_alloc(int size)
 		while(num_splits > 0){
 
 			// Determine the right half side start address from the left half.  Retrieve the
-			// associated page from g_pages.
-			char * right_addr = BUDDY_ADDR(lefty->address, active_order);
-		
-			//righty = list_entry(&g_pages[ADDR_TO_PAGE(right_addr)].list, block_t, list);
-			
+			// associated page from g_pages. Use the enxt lowest
+			// order since we are breaking this downward
+			char * right_addr = BUDDY_ADDR(lefty->address, (active_order-1));
 			righty = &g_pages[ADDR_TO_PAGE(right_addr)];
-			
 			righty->order = active_order-1;
 			righty->isFree = 1;
 			righty->address = right_addr;
-
 			
+			
+#if USE_DEBUG
+			printf("Right half at order %d will have address %p\n", righty->order, right_addr);
 			printf("Adding right half to next lowest order...\n");
 			count_blocks(&free_area[active_order-1]);
-
+#endif
 
 			// Add the right half to the free_area of the next lowest order.
 			list_add(&righty->list, &free_area[active_order-1]);
 
+#if USE_DEBUG
 			count_blocks(&free_area[active_order-1]);
+#endif
 
 			// Sanity Check:
 			block_t * temp = list_entry(free_area[active_order-1].next, block_t, list);
+#if USE_DEBUG
 			printf("RIGHTY VS NEW BLOCK (index, order): (%d,%d) (%d, %d)\n", righty->index, righty->order, temp->index, temp->order);
+#endif
 			
 			assert(temp->index == righty->index);
 
@@ -338,6 +349,8 @@ void *buddy_alloc(int size)
 			
 			num_splits--;
 		}
+
+		assert(active_order == target_order);
 
 		// By this point, active_order should equal target order.  All that
 		// remains to do is to adjust the size of lefty, set it to in use, and
@@ -363,7 +376,57 @@ void *buddy_alloc(int size)
  */
 void buddy_free(void *addr)
 {
-	/* TODO: IMPLEMENT THIS FUNCTION */
+
+	// Locate the block associate with the address passed in
+	// if it does not exist, error out
+	block_t * block = find_block(addr);
+	if(NULL == block){
+		printf("[ FREE ERROR: FREE ON FREE PAGE ]\n");
+	}
+
+	printf("LOCATED THE GIVEN BLOCK...\n");
+
+	block_t * buddy = NULL;
+
+	// Merging
+	//
+	// We need to follow the pattern:
+	//
+	// 	Search for a buddy on the current level.
+	// 	If the buddy is not free, the block remains here and is
+	// 	marked as free.
+	// 	If the buddy does not exist, and we are not at the maximum
+	// 	order, then something went wrong elsewhere.
+	// 	Otherwise, merge the two into the block at hand, change the
+	// 	order, and move to the next list up.
+	//
+
+	// Identify the buddy address which goes with the given address
+	char* buddy_addr = (char*)BUDDY_ADDR(addr, block->order);
+	
+	printf("SEARCHING FOR BUDDY: %p\n", buddy_addr);
+
+	// locate the block which begins with this address in the free_areas
+	// if it does not exist, error out
+	buddy = find_block(buddy_addr);
+	if(NULL == buddy){
+		printf("[ FREE ERROR: BUDDY NOT FOUND ]");
+	}
+
+	printf("Block has order %d, buddy has order %d\n", block->order, buddy->order);
+
+	// otherwise:
+	// 	remove both blocks from the current free_area
+		list_del(&block->list);
+		list_del(&buddy->list);
+
+	// 	destroy the buddy (always has the higher address, so we can
+	// 	simply merge it into the other block by removal)
+		
+
+	// 	determine what order the combined block belongs to
+		
+	// 	add it to that free_area
 }
 
 
@@ -379,19 +442,43 @@ void buddy_free(void *addr)
  */
 void buddy_dump()
 {
+#if USE_DEBUG
 	buddy_dump_verbose();
-	/*
+#endif
 	int o;
 	for (o = MIN_ORDER; o <= MAX_ORDER; o++) {
 		struct list_head *pos;
 		int cnt = 0;
-		list_for_each(pos, free_area[o].next) {
-			cnt++;
+		list_for_each(pos, &free_area[o]) {
+			block_t * temp = list_entry(pos, block_t, list);
+			if(temp->isFree == 1){
+				cnt++;
+			}
 		}
 		printf("%d:%dK ", cnt, (1<<o)/1024);
 	}
 	printf("\n");
-	*/
+}
+
+
+void buddy_dump_verbose(){
+	int o;
+	for (o = MIN_ORDER; o <= MAX_ORDER; o++) {
+		struct list_head *pos;
+		int cnt = 0;
+		int total = 0;
+		list_for_each(pos, &free_area[o]) {
+			block_t * temp = list_entry(pos, block_t, list);
+			total++;
+			if(1 == temp->isFree){
+				cnt++;
+			}
+			//printf("Block %d: (size, isFree)->(%d, %s)\n", cnt, (1 << temp->order), temp->isFree == 1 ? "FREE":"ALLOCATED");
+		}
+		printf("(%d/%d):%dK ", cnt, total, (1<<o)/1024);
+	}
+	printf("\n");
+	
 }
 
 
@@ -450,22 +537,22 @@ block_t* find_free_block(int order){
 	return NULL;
 }
 
-void buddy_dump_verbose(){
-	int o;
-	for (o = MIN_ORDER; o <= MAX_ORDER; o++) {
-		struct list_head *pos;
-		int cnt = 0;
-		int total = 0;
-		list_for_each(pos, &free_area[o]) {
-			block_t * temp = list_entry(pos, block_t, list);
-			total++;
-			if(1 == temp->isFree){
-				cnt++;
+block_t* find_block(char* addr){
+	int order;
+	block_t * ret;
+	for(order = MIN_ORDER; order <= MAX_ORDER; ++order){
+		struct list_head *p;
+		list_for_each(p, &free_area[order]){
+			ret = list_entry(p, block_t, list);
+			if(ret->address == addr){
+				printf("Found block with address %p!\n", ret->address);
+				return ret;	
 			}
-			//printf("Block %d: (size, isFree)->(%d, %s)\n", cnt, (1 << temp->order), temp->isFree == 1 ? "FREE":"ALLOCATED");
+			else{
+				printf("%p doesn't match target %p, moving on...\n", ret->address, addr);	
+			}
 		}
-		printf("(%d/%d):%dK ", cnt, total, (1<<o)/1024);
 	}
-	printf("\n");
-	
+	printf("BLOCK NOT FOUND...\n");
+	return NULL;
 }
