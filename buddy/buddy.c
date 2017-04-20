@@ -7,7 +7,7 @@
 /**************************************************************************
  * Conditional Compilation Options
  **************************************************************************/
-#define USE_DEBUG 1
+#define USE_DEBUG 0
 
 /**************************************************************************
  * Included Files
@@ -132,7 +132,7 @@ void buddy_dump();
 
 // Returns a pointer to the buddy block with the given address if it exists in
 // the free_area, or NULL otherwise
-block_t* find_block(char* addr);
+block_t* find_block(char* addr, int order);
 
 /**************************************************************************
  * Local Functions
@@ -376,57 +376,98 @@ void *buddy_alloc(int size)
  */
 void buddy_free(void *addr)
 {
+	int current_order;
+	int floating;
+	block_t *block = NULL;
+	block_t *buddy = NULL;
 
 	// Locate the block associate with the address passed in
 	// if it does not exist, error out
-	block_t * block = find_block(addr);
+	for(current_order=MIN_ORDER; current_order < MAX_ORDER; ++current_order){
+		block = find_block(addr, current_order);
+		if(NULL != block){
+			break;	
+		}
+	}
+#if USE_DEBUG
+
 	if(NULL == block){
 		printf("[ FREE ERROR: FREE ON FREE PAGE ]\n");
+
+		return;
 	}
-
-	printf("LOCATED THE GIVEN BLOCK...\n");
-
-	block_t * buddy = NULL;
-
+	else{
+		printf("LOCATED THE GIVEN BLOCK...\n");
+	}
+#endif
 	// Merging
 	//
 	// We need to follow the pattern:
 	//
-	// 	Search for a buddy on the current level.
-	// 	If the buddy is not free, the block remains here and is
-	// 	marked as free.
-	// 	If the buddy does not exist, and we are not at the maximum
-	// 	order, then something went wrong elsewhere.
-	// 	Otherwise, merge the two into the block at hand, change the
-	// 	order, and move to the next list up.
+	// 	Search for a buddy at the current order.
+	// 	
+	// 	If the buddy is not free, this block remains here and is
+	// 	marked as free.  Update its order and return.
+	// 	
+	//	If the buddy does not exist, we assume that we are done.  Free
+	//	this block, adjust the order, and return.
 	//
+	// 	Otherwise, merge the two into the block at hand, change the
+	// 	order, and move to the next list up. Search again.
+	//
+	
 
 	// Identify the buddy address which goes with the given address
 	char* buddy_addr = (char*)BUDDY_ADDR(addr, block->order);
-	
-	printf("SEARCHING FOR BUDDY: %p\n", buddy_addr);
 
 	// locate the block which begins with this address in the free_areas
-	// if it does not exist, error out
-	buddy = find_block(buddy_addr);
-	if(NULL == buddy){
-		printf("[ FREE ERROR: BUDDY NOT FOUND ]");
-	}
+	buddy = find_block(buddy_addr, block->order);
 
-	printf("Block has order %d, buddy has order %d\n", block->order, buddy->order);
+	while(NULL != buddy){
 
-	// otherwise:
-	// 	remove both blocks from the current free_area
-		list_del(&block->list);
-		list_del(&buddy->list);
+		if(1 == buddy->isFree){
+#if USE_DEBUG
+			printf("Removing from order %d\n", block->order);
+#endif
+			
+			// Remove both blocks from the current free_area
+			list_del(&buddy->list);
+			list_del(&block->list);
 
-	// 	destroy the buddy (always has the higher address, so we can
-	// 	simply merge it into the other block by removal)
-		
+			// Destroy the buddy (always has the higher address, so we can
+			// Simply merge it into the other block by removal).
+			// Since this is all in automatic memory, just
+			// undangle the pointer.  Undangle it.
+			buddy = NULL;
+			
+			// Update the order for this block and add it to that free_area
+			block->order++;
+#if USE_DEBUG
+			printf("Adding merged block to order %d\n", block->order);
+			count_blocks(&free_area[block->order]);
+#endif
+			list_add(&block->list, &free_area[block->order]);
+#if USE_DEBUG
+			count_blocks(&free_area[block->order]);
+#endif
 
-	// 	determine what order the combined block belongs to
-		
-	// 	add it to that free_area
+			// Get a new buddy address
+			buddy_addr = (char*)BUDDY_ADDR(addr, block->order);
+
+			// Search for another buddy
+			buddy = find_block(buddy_addr, block->order);
+		}
+		else{
+			// Buddy is still in use, exit and return
+			buddy = NULL;
+			break;
+		}
+
+	}// End while(NULL != buddy)
+
+	// Mark block as freed
+	block->isFree = 1;;
+	
 }
 
 
@@ -537,22 +578,26 @@ block_t* find_free_block(int order){
 	return NULL;
 }
 
-block_t* find_block(char* addr){
-	int order;
+block_t* find_block(char* addr, int order){
 	block_t * ret;
-	for(order = MIN_ORDER; order <= MAX_ORDER; ++order){
-		struct list_head *p;
-		list_for_each(p, &free_area[order]){
-			ret = list_entry(p, block_t, list);
-			if(ret->address == addr){
-				printf("Found block with address %p!\n", ret->address);
-				return ret;	
-			}
-			else{
-				printf("%p doesn't match target %p, moving on...\n", ret->address, addr);	
-			}
+	struct list_head *p;
+	list_for_each(p, &free_area[order]){
+		ret = list_entry(p, block_t, list);
+		if(ret->address == addr){
+#if USE_DEBUG
+			printf("Found block with address %p!\n", ret->address);
+#endif
+			return ret;	
 		}
+#if USE_DEBUG
+		else{
+			printf("%p doesn't match target %p, moving on...\n", ret->address, addr);	
+		}
+#endif
 	}
+
+#if USE_DEBUG
 	printf("BLOCK NOT FOUND...\n");
+#endif
 	return NULL;
 }
