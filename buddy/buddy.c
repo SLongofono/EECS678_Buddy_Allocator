@@ -112,6 +112,12 @@ block_t buffer;
  **************************************************************************/
 // Helpers
 
+// Merge two blocks, and move to the next highest order.
+void merge(block_t *block, block_t *buddy);
+
+// Print a graph of the current allocations
+void print_free_area();
+
 // Count and report number of block_t elements in the free_area of the
 // specified order
 void count_blocks(struct list_head * theList);
@@ -178,7 +184,7 @@ void buddy_init()
 	}
 	
 	/* add the entire memory as a free block */
-	list_add(&g_pages[0].list, free_area[MAX_ORDER].next);
+	list_add(&g_pages[0].list, &free_area[MAX_ORDER]);
 		
 
 #if USE_DEBUG
@@ -306,7 +312,7 @@ void *buddy_alloc(int size)
 		count_blocks(&free_area[active_order]);
 #endif
 		
-		
+	
 		// Need to remove the left from this order
 		list_del(&lefty->list);
 		
@@ -360,7 +366,9 @@ void *buddy_alloc(int size)
 		lefty->order = active_order;
 		list_add_tail(&lefty->list, &free_area[active_order]);
 	}
-
+#if USE_DEBUG
+	print_free_area();
+#endif
 	return lefty->address;
 }
 
@@ -373,11 +381,11 @@ void *buddy_alloc(int size)
  * process continues until one of the buddies is not free.
  *
  * @param addr memory block address to be freed
+ *
  */
 void buddy_free(void *addr)
 {
 	int current_order;
-	int floating;
 	block_t *block = NULL;
 	block_t *buddy = NULL;
 
@@ -397,6 +405,7 @@ void buddy_free(void *addr)
 		return;
 	}
 	else{
+		printf("FREEING BLOCK OF ORDER %d (%d bytes)\n", block->order, (1 << block->order));
 		printf("LOCATED THE GIVEN BLOCK...\n");
 	}
 #endif
@@ -413,7 +422,7 @@ void buddy_free(void *addr)
 	//	this block, adjust the order, and return.
 	//
 	// 	Otherwise, merge the two into the block at hand, change the
-	// 	order, and move to the next list up. Search again.
+	// 	order, and add to the next list up. Repeat from top.
 	//
 	
 
@@ -427,21 +436,28 @@ void buddy_free(void *addr)
 
 		if(1 == buddy->isFree){
 #if USE_DEBUG
+			printf("Found free buddy %p\n", buddy->address);
 			printf("Removing from order %d\n", block->order);
 #endif
-			
+			//merge(block,buddy);
 			// Remove both blocks from the current free_area
 			list_del(&buddy->list);
 			list_del(&block->list);
 
-			// Destroy the buddy (always has the higher address, so we can
-			// Simply merge it into the other block by removal).
-			// Since this is all in automatic memory, just
-			// undangle the pointer.  Undangle it.
-			buddy = NULL;
+			// Destroy the block with the larger address. Undangle it.
+			if(block->address < buddy->address){
+				buddy = NULL;
+			}
+			else{
+				block = buddy;
+				buddy = NULL;
+			}
 			
 			// Update the order for this block and add it to that free_area
-			block->order++;
+			if(block->order < MAX_ORDER){
+				block->order++;
+			}
+
 #if USE_DEBUG
 			printf("Adding merged block to order %d\n", block->order);
 			count_blocks(&free_area[block->order]);
@@ -451,22 +467,55 @@ void buddy_free(void *addr)
 			count_blocks(&free_area[block->order]);
 #endif
 
+
 			// Get a new buddy address
-			buddy_addr = (char*)BUDDY_ADDR(addr, block->order);
+			buddy_addr = (char*)BUDDY_ADDR(block->address, block->order);
 
 			// Search for another buddy
 			buddy = find_block(buddy_addr, block->order);
 		}
 		else{
+			printf("Buddy %p is still busy, freeing block...\n", buddy->address);
 			// Buddy is still in use, exit and return
 			buddy = NULL;
 			break;
 		}
 
 	}// End while(NULL != buddy)
-
+	
 	// Mark block as freed
-	block->isFree = 1;;
+	block->isFree = 1;
+#if 0
+	// Need to make another pass in case the merged block completes
+	// another.
+	// Use safe because we may remove entries from the active list
+	struct list_head *p;
+	struct list_head *q;
+	list_for_each_safe(p, q,&free_area[block->order]){
+		block = list_entry(p, block_t, list);
+
+		// For each free member, check if its buddy exists
+		if(1 == block->isFree){
+
+			buddy_addr = (char*)BUDDY_ADDR(block->address, block->order);
+			buddy = find_block(buddy->address, block->order);
+
+			while(NULL != buddy){
+
+				if(1 == buddy->isFree){
+					// If so, and it is free, merge
+					merge(block, buddy);
+				
+					buddy_addr = (char*)BUDDY_ADDR(block->address, block->order);
+					buddy = find_block(buddy->address, block->order);
+				}
+			}
+		}
+	}
+#endif
+#if USE_DEBUG
+	print_free_area();
+#endif
 	
 }
 
@@ -523,20 +572,66 @@ void buddy_dump_verbose(){
 }
 
 
+/*
+ * Merge a block with its buddy and move to the next highest order.
+ */
+void merge(block_t *block, block_t *buddy){
+	// Remove both blocks from the current free_area
+	list_del(&buddy->list);
+	list_del(&block->list);
+
+	// Destroy the block with the larger address. Undangle it.
+	if(block->address < buddy->address){
+		buddy = NULL;
+	}
+	else{
+		block = buddy;
+		buddy = NULL;
+	}
+			
+	// Update the order for this block and add it to that free_area
+	if(block->order < MAX_ORDER){
+		block->order++;
+	}
+
+#if USE_DEBUG
+	printf("Adding merged block to order %d\n", block->order);
+	count_blocks(&free_area[block->order]);
+#endif
+	list_add(&block->list, &free_area[block->order]);
+#if USE_DEBUG
+	count_blocks(&free_area[block->order]);
+#endif
+
+}
+
+
+
 /**
  * Print addresses of free area list members
  */
-void  print_free_area(int order){
+void  print_free_area(){
 	
 	int i;
-	for(i=MIN_ORDER; i < MAX_ORDER; ++i){
+	for(i=MAX_ORDER; i >= MIN_ORDER; i--){
 		struct list_head *pos;
+		printf("Order %d, %d bytes\n", i, (1 << i));
+		printf(" --------------------------------------------------------------- \n");
+		printf(" | ");
 		list_for_each(pos, &free_area[i]){
 			block_t * temp = list_entry(pos, block_t, list);
-			print_block(temp);
+			if(1 == temp->isFree){
+				printf("%p, F", temp->address);
+			}
+			else{
+				printf("%p, A", temp->address);	
+			}
+			printf(" | ");
 		}
 		printf("\n");
+		printf(" --------------------------------------------------------------- \n");
 	}
+	
 }
 
 
@@ -579,6 +674,10 @@ block_t* find_free_block(int order){
 }
 
 block_t* find_block(char* addr, int order){
+#if USE_DEBUG
+	printf("Searching order %d for %p...\n", order, addr);
+#endif
+
 	block_t * ret;
 	struct list_head *p;
 	list_for_each(p, &free_area[order]){
@@ -597,7 +696,7 @@ block_t* find_block(char* addr, int order){
 	}
 
 #if USE_DEBUG
-	printf("BLOCK NOT FOUND...\n");
+	printf("BLOCK %p NOT FOUND at order %d...\n", addr, order);
 #endif
 	return NULL;
 }
