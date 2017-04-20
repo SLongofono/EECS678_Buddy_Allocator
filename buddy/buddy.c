@@ -1,8 +1,7 @@
 /**
  * Buddy Allocator
- *
- * For the list library usage, see http://www.mcs.anl.gov/~kazutomo/list/
  */
+
 
 /**************************************************************************
  * Conditional Compilation Options
@@ -23,10 +22,11 @@
 /**************************************************************************
  * Public Definitions
  **************************************************************************/
-#define MIN_ORDER 12
-#define MAX_ORDER 20
+#define MIN_ORDER 12	// Represents the power of 2 of the minimum block size in bytes
+#define MAX_ORDER 20	// Represents the power of 2 of the maximum block size in bytes
 
-#define PAGE_SIZE (1<<MIN_ORDER)
+#define PAGE_SIZE (1<<MIN_ORDER)	// Represents the size of a page in bytes
+
 /* page index to address */
 #define PAGE_TO_ADDR(page_idx) (void *)((page_idx*PAGE_SIZE) + g_memory)
 
@@ -51,8 +51,21 @@
 /**************************************************************************
  * Public Types
  **************************************************************************/
+
+
+/**
+ * @type block_t
+ *
+ * @details The block type represents one or more pages in a compact format.
+ * It makes use of the Linux kernel linked list, so it includes the list_head
+ * type as a handle into that system.
+ */
 typedef struct {
-	/* Every list member has a member called list_head, because the Linux
+
+
+	/* Usage notes
+	 *
+	 * Every list member has a member called list_head, because the Linux
 	 * kernel uses a circular linked list scheme.
 	 *
 	 * list_head is used internally, and we need only to include it in our
@@ -61,9 +74,6 @@ typedef struct {
 	 * When an individual element is initialized, its next and previous
 	 * pointer are set to itself.
 	 */
-		
-
-
 	struct list_head list;
 
 	// The address where this page begins
@@ -71,9 +81,6 @@ typedef struct {
 
 	// The power of 2 representing the number of bytes in this block
 	int order;
-
-	// The index of this page into memory
-	int index;
 
 	// Is this page free
 	int isFree;
@@ -88,18 +95,14 @@ typedef struct {
 /* free lists, store structs representing pages in blocks of various orders */
 struct list_head free_area[MAX_ORDER+1];
 
-/* memory area, no real use beyond the macros and initialization */
+/*
+ * memory area, no real use beyond the macros and initialization
+ * In fact, this is only still here because it was included code...
+ */
 char g_memory[1<<MAX_ORDER];
 
-/* page structures */
+/* block structures */
 block_t g_pages[(1<<MAX_ORDER)/PAGE_SIZE];
-
-/* keeps track of allocated blocks in compact format */
-struct list_head allocated;
-
-	
-// For managing the pages to be allocated and split
-block_t buffer;
 
 
 /**************************************************************************
@@ -110,6 +113,7 @@ block_t buffer;
 /**************************************************************************
  * Private Definitions
  **************************************************************************/
+
 // Helpers
 
 // Merge two blocks, and move to the next highest order.
@@ -140,10 +144,16 @@ void buddy_dump();
 // the free_area, or NULL otherwise
 block_t* find_block(char* addr, int order);
 
+
 /**************************************************************************
  * Local Functions
  **************************************************************************/
 
+
+/**
+ * @brief Initialize a list of all possible addresses for the given MAX_ORDER,
+ *		and set up a list element for the first address.
+ */
 void buddy_init()
 {
 
@@ -168,9 +178,6 @@ void buddy_init()
 		// Initialize this as a linked list element
 		INIT_LIST_HEAD(&g_pages[i].list);
 
-		// Track indices for sizing and moving
-		g_pages[i].index = i;
-
 		// All start as free
 		g_pages[i].isFree = 1;
 
@@ -183,7 +190,7 @@ void buddy_init()
 	
 	}
 	
-	/* add the entire memory as a free block */
+	/* add the entire memory as a single free block */
 	list_add(&g_pages[0].list, &free_area[MAX_ORDER]);
 		
 
@@ -213,13 +220,15 @@ void *buddy_alloc(int size)
 
 	/*
 	 * Basic idea:
-	 * 	The only thing you need to represent a chunk in memory is its
-	 * 	starting address and how big it is as a whole.
+	 * 	The only thing necessary to represent a block in memory is its
+	 * 	starting address and how big it is as a whole(order).
 	 * 	
 	 * 	If we maintain this scheme, we need only move around the
-	 * 	minimum number of block types (***NOT PAGE TYPES***).
+	 * 	minimum number of block types (***NOT PAGE TYPES***).  The
+	 * 	rubric and lecture materials are a pedagogical nightmare.
+	 * 	Let's call one thing a page, and other things something else!
 	 *
-	 * 	After identifying the smallest order with a free chunk, along
+	 * 	After identifying the smallest order with a free block, along
 	 * 	with the target order of the given allocation size, we can
 	 * 	determine the number of splits for each.  
 	 * */
@@ -227,9 +236,9 @@ void *buddy_alloc(int size)
 
 
 #if USE_DEBUG
-
 	printf("Attempting to allocate for size %d...\n", size);
 #endif
+
 	// Check that size is valid
 	if(size > (1 << MAX_ORDER) || size < 0){
 		printf("[ INVALID SIZE ERROR : MAX SIZE IS %d BYTES ]\n", (1 << MAX_ORDER));
@@ -240,7 +249,7 @@ void *buddy_alloc(int size)
 	int target_order = MAX_ORDER;
 	int active_order = -1;
 
-	// Navigating the linked lists
+	// Shuffling list members
 	block_t *lefty;
 	block_t *righty;
 
@@ -269,9 +278,10 @@ void *buddy_alloc(int size)
 		}
 		else if(active_order == MAX_ORDER){
 			printf("[ OUT OF MEMORY ERROR ]\n");
-			return NULL;	
+			return NULL;
 		}
 		else{
+
 #if USE_DEBUG
 			printf("Order %d has no free blocks...\n", active_order);	
 #endif
@@ -307,6 +317,7 @@ void *buddy_alloc(int size)
 		lefty->isFree = 0;
 	}
 	else{
+
 #if USE_DEBUG
 		printf("Removing left half from current active list...\n");
 		count_blocks(&free_area[active_order]);
@@ -345,11 +356,7 @@ void *buddy_alloc(int size)
 
 			// Sanity Check:
 			block_t * temp = list_entry(free_area[active_order-1].next, block_t, list);
-#if USE_DEBUG
-			printf("RIGHTY VS NEW BLOCK (index, order): (%d,%d) (%d, %d)\n", righty->index, righty->order, temp->index, temp->order);
-#endif
-			
-			assert(temp->index == righty->index);
+			assert(temp->address == righty->address);
 
 			active_order--;
 			
@@ -365,10 +372,12 @@ void *buddy_alloc(int size)
 		lefty->isFree = 0;
 		lefty->order = active_order;
 		list_add_tail(&lefty->list, &free_area[active_order]);
-	}
+	} // End if(0 == num_splits)
+
 #if USE_DEBUG
 	print_free_area();
 #endif
+	
 	return lefty->address;
 }
 
@@ -378,7 +387,7 @@ void *buddy_alloc(int size)
  *
  * Whenever a block is freed, the allocator checks its buddy. If the buddy is
  * free as well, then the two buddies are combined to form a bigger block. This
- * process continues until one of the buddies is not free.
+ * process continues until one of the buddies is not free, or no buddies exist.
  *
  * @param addr memory block address to be freed
  *
@@ -409,9 +418,8 @@ void buddy_free(void *addr)
 		printf("LOCATED THE GIVEN BLOCK...\n");
 	}
 #endif
-	// Merging
-	//
-	// We need to follow the pattern:
+
+	// 	Merging follows the pattern:
 	//
 	// 	Search for a buddy at the current order.
 	// 	
@@ -422,7 +430,7 @@ void buddy_free(void *addr)
 	//	this block, adjust the order, and return.
 	//
 	// 	Otherwise, merge the two into the block at hand, change the
-	// 	order, and add to the next list up. Repeat from top.
+	// 	order, and add to the next list up. Repeat.
 	//
 	
 
@@ -435,11 +443,12 @@ void buddy_free(void *addr)
 	while(NULL != buddy){
 
 		if(1 == buddy->isFree){
+
 #if USE_DEBUG
 			printf("Found free buddy %p\n", buddy->address);
 			printf("Removing from order %d\n", block->order);
 #endif
-			//merge(block,buddy);
+
 			// Remove both blocks from the current free_area
 			list_del(&buddy->list);
 			list_del(&block->list);
@@ -462,7 +471,11 @@ void buddy_free(void *addr)
 			printf("Adding merged block to order %d\n", block->order);
 			count_blocks(&free_area[block->order]);
 #endif
+
+			// Add the merged block to the now higher order or
+			// block sizes
 			list_add(&block->list, &free_area[block->order]);
+
 #if USE_DEBUG
 			count_blocks(&free_area[block->order]);
 #endif
@@ -475,7 +488,11 @@ void buddy_free(void *addr)
 			buddy = find_block(buddy_addr, block->order);
 		}
 		else{
+
+#if USE_DEBUG
 			printf("Buddy %p is still busy, freeing block...\n", buddy->address);
+#endif
+
 			// Buddy is still in use, exit and return
 			buddy = NULL;
 			break;
@@ -485,34 +502,7 @@ void buddy_free(void *addr)
 	
 	// Mark block as freed
 	block->isFree = 1;
-#if 0
-	// Need to make another pass in case the merged block completes
-	// another.
-	// Use safe because we may remove entries from the active list
-	struct list_head *p;
-	struct list_head *q;
-	list_for_each_safe(p, q,&free_area[block->order]){
-		block = list_entry(p, block_t, list);
 
-		// For each free member, check if its buddy exists
-		if(1 == block->isFree){
-
-			buddy_addr = (char*)BUDDY_ADDR(block->address, block->order);
-			buddy = find_block(buddy->address, block->order);
-
-			while(NULL != buddy){
-
-				if(1 == buddy->isFree){
-					// If so, and it is free, merge
-					merge(block, buddy);
-				
-					buddy_addr = (char*)BUDDY_ADDR(block->address, block->order);
-					buddy = find_block(buddy->address, block->order);
-				}
-			}
-		}
-	}
-#endif
 #if USE_DEBUG
 	print_free_area();
 #endif
@@ -521,14 +511,11 @@ void buddy_free(void *addr)
 
 
 /**
- * Print the buddy system status---order oriented
- *
- * print free pages in each order.
+ * @brief print free pages in each order.
  *
  *
- * Note: this implies that free area lists are made up of pages and not
- * chunks.  For each size, it counts the number of pages, and divides by the
- * size of the current free_area list order
+ * @note The output of this function is diff'd with the expected results file.
+ * 	 Bad touch!
  */
 void buddy_dump()
 {
@@ -551,6 +538,10 @@ void buddy_dump()
 }
 
 
+/**
+ * @brief Print a more useful and thorough dump of the free area
+ *
+ */
 void buddy_dump_verbose(){
 	int o;
 	for (o = MIN_ORDER; o <= MAX_ORDER; o++) {
@@ -563,7 +554,6 @@ void buddy_dump_verbose(){
 			if(1 == temp->isFree){
 				cnt++;
 			}
-			//printf("Block %d: (size, isFree)->(%d, %s)\n", cnt, (1 << temp->order), temp->isFree == 1 ? "FREE":"ALLOCATED");
 		}
 		printf("(%d/%d):%dK ", cnt, total, (1<<o)/1024);
 	}
@@ -573,7 +563,12 @@ void buddy_dump_verbose(){
 
 
 /*
- * Merge a block with its buddy and move to the next highest order.
+ * @brief Merge a block with its buddy and move to the next highest order.
+ *
+ * @note This function was left in because it has weird scoping issues.
+ *
+ * TODO Figure out why changes herein are not persistent in the block_t types
+ * passed in.
  */
 void merge(block_t *block, block_t *buddy){
 	// Remove both blocks from the current free_area
@@ -608,7 +603,8 @@ void merge(block_t *block, block_t *buddy){
 
 
 /**
- * Print addresses of free area list members
+ * @brief Print free areas in a tabular format, similar to the buddy allocator
+ * 		slides and examples
  */
 void  print_free_area(){
 	
@@ -635,6 +631,9 @@ void  print_free_area(){
 }
 
 
+/**
+ * @brief Count and report the number of blocks in a given free_area member
+ */
 void count_blocks(struct list_head* theList){
 	
 	int count = 0;
@@ -646,19 +645,18 @@ void count_blocks(struct list_head* theList){
 }
 
 
+/**
+ * @brief Print information for a given block.
+ */
 void print_block(block_t * block){
 	printf("Block Summary: (order, address, isFree)->(%d, %p, %s)\n", block->order, block->address, block->isFree == 1 ? "FREE": "NOT FREE");
 }
 
 
-void init_block(block_t* block, char* addr, int order){
-	block->address = addr;
-	block->isFree = 1;
-	block->order = order;
-	INIT_LIST_HEAD(&block->list);
-}
-
-
+/**
+ * @brief Locate and return a pointer to a free block in the given order among
+ * 		the free_area, or NULL if no such block exists.
+ */
 block_t* find_free_block(int order){
 
 	block_t * ret;
@@ -673,7 +671,14 @@ block_t* find_free_block(int order){
 	return NULL;
 }
 
+
+/**
+ * @brief Locate and return a pointer to the block with the given address
+ * 		within the free area of the given order.  Return NULL if
+ * 		no such block exists.
+ */
 block_t* find_block(char* addr, int order){
+
 #if USE_DEBUG
 	printf("Searching order %d for %p...\n", order, addr);
 #endif
