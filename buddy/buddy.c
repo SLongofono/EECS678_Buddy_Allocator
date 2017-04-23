@@ -241,7 +241,7 @@ void *buddy_alloc(int size)
 
 	// Check that size is valid
 	if(size > (1 << MAX_ORDER) || size < 0){
-		printf("[ INVALID SIZE ERROR : MAX SIZE IS %d BYTES ]\n", (1 << MAX_ORDER));
+		//printf("[ INVALID SIZE ERROR : MAX SIZE IS %d BYTES ]\n", (1 << MAX_ORDER));
 		return NULL;
 	}
 
@@ -277,7 +277,7 @@ void *buddy_alloc(int size)
 			break;
 		}
 		else if(active_order == MAX_ORDER){
-			printf("[ OUT OF MEMORY ERROR ]\n");
+			//printf("[ OUT OF MEMORY ERROR ]\n");
 			return NULL;
 		}
 		else{
